@@ -61,14 +61,15 @@ module.exports.pullRecord = (event, context, callback) => {
         // Check if there are actual results or move on
         if (results == "") {
           console.log("No records matched in this file.");
-          sendMail(formData);
+          sendNoRecordEmail(formData);
         } else {
           
           // Convert the results array into a single object
-          var outCSV = results.join('\n');
+          var outCSV = "Header1, Header2, Header3, HeaderEtc\n";
+          outCSV = outCSV + results.join('\n');
 
           // Zip the outCSV object
-          zlib.gzip(outCSV, function (error, result) {
+          zlib.gzip(outCSV, {level: 9}, function (error, result) {
             if (error) throw error;
       
             const gzipCSV = result; 
@@ -98,7 +99,7 @@ module.exports.pullRecord = (event, context, callback) => {
                 // Send the mail using the new file object
 
                 sendRawMail(formData, file);
-                replyPage(200, "Files for " + formData.telephone + " are being retrieved", callback);
+                replyPage(200, "Files for " + formData.mdn + " are being retrieved", callback);
               };
             });
   
@@ -137,14 +138,14 @@ function replyPage(status, message, callback) {
 
 function sendRawMail(formData, file) {
   // send as email attachment
-  var ses_mail = "From: Data Handling <data.handling@business.com>\n";
-  ses_mail = ses_mail + "To: end.user@business.com\n";
-  ses_mail = ses_mail + "Subject: business Data Request for " + formData.telephone + "\n";
+  var ses_mail = "From: DR <dr@company.com>\n";
+  ses_mail = ses_mail + "To: " + formData.email + "\n";
+  ses_mail = ses_mail + "Subject: Data Request for " + formData.mdn + "\n";
   ses_mail = ses_mail + "MIME-Version: 1.0\n";
   ses_mail = ses_mail + "Content-Type: multipart/mixed; boundary=\"NextPart\"\n\n";
   ses_mail = ses_mail + "--NextPart\n";
   ses_mail = ses_mail + "Content-Type: text/html; charset=us-ascii\n";
-  ses_mail = ses_mail + "\n<p>Please see the attached file for the records that matched the provided telephone.</p>\n";
+  ses_mail = ses_mail + "\n<p>Please see the attached file for the records that matched the provided mdn.</p>\n";
   ses_mail = ses_mail + "--NextPart\n";    
   ses_mail = ses_mail + "Content-Type: application/zip; name=\"" + formData.key + "\"\n";
   ses_mail = ses_mail + "Content-Description: " + formData.key + "\n";
@@ -157,9 +158,9 @@ function sendRawMail(formData, file) {
       Data: new Buffer(ses_mail)
     },
     Destinations: [
-      `end.user@business.com`
+      formData.email
     ],
-    Source: `data.handling@business.com`
+    Source: `dr@company.com`
   };
   
   SES.sendRawEmail(params, function(err, data) {
@@ -168,33 +169,30 @@ function sendRawMail(formData, file) {
   });
 };
 
-function sendMail(formData, callback) {
+function sendNoRecordEmail(formData) {
+
   const emailParams = {
-    Source: 'data.handling@business.com', // SES SENDING EMAIL
-    ReplyToAddresses: ["data.handling@business.com"],
+    Source: 'dr@company.com', // SES SENDING EMAIL
+    ReplyToAddresses: ["dr@company.com"],
     Destination: {
-      ToAddresses: ["end.user@business.com"], // SES RECEIVING EMAIL
+      ToAddresses: [formData.email]
     },
     Message: {
       Body: {
-        Html: {
-          Charset: 'UTF-8',
-          Data: `\n<p>File ${formData.key} has no matching records for ${formData.telephone}</p>\n`
-        },
         Text: {
           Charset: 'UTF-8',
-          Data: `\nFile ${formData.key} has no matching records for ${formData.telephone}\n`
-        }
+          Data: `${formData.key} had no records for the query submitted.`
+        },
       },
       Subject: {
         Charset: 'UTF-8',
-        Data: `Data Retrieval For ${formData.telephone}`,
-      }
+        Data: `No records in file: ${formData.key}`
+      },
     }
   };
-  console.log("Mail sent");
-  SES.sendEmail(emailParams,  function(err, data) {
+
+  SES.sendEmail(emailParams, function(err, data) {
     if (err) console.log(err, err.stack); // an error occurred
     else     console.log(data);           // successful response
   });
-}
+};

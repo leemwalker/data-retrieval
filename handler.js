@@ -4,16 +4,15 @@
 WORKFLOW
 1. Convert the formData object sent from the page into a JSON object.
 2. Check if the honeypot field has been submitted, if so fail silently.
-3. Check if there in no telephone/keyword value present and verify that a business/origincode value is present
+3. Check if there in no MDN/Campaign value present and verify that a Company/Shortcode value is present
 3a. Run pullFiles if so.
-3b. If a telephone/keyword value is present run pullRecords.
+3b. If a MDN/Campaign value is present run pullRecords.
 3c. If none of the above fail with a reply to the page stating so.
 
 TODO
 1. Create pullRecords, pullFiles, and sendMail as separate serverless functions
 2. Accept comma separated lists in all fields except start_date and end_date
 3. Email the file list result for pullFiles or display it on the page
-
 */
 
 
@@ -32,14 +31,14 @@ module.exports.submitData = (event, context, callback) => {
   // Return with no response if honeypot is present
   if (formData.honeypot) return;
 
-  // Check here to see if telephone and keyword are both missing
-  // If so, run the file pull for business and send the message to the page stating that is happening
-  if (!formData.telephone && !formData.keyword && (formData.business || formData.origincode)) {
-    replyPage(200, "Files for " + formData.business + formData.origincode + " are being retrieved", callback);
+  // Check here to see if MDN and Campaign are both missing
+  // If so, run the file pull for company and send the message to the page stating that is happening
+  if (!formData.mdn && !formData.campaign && !formData.message_type && !formData.message_uid && (formData.company || formData.shortcode)) {
+    replyPage(200, "Files for " + formData.company + formData.shortcode + " are being retrieved", callback);
     
     pullFiles(formData);
-  } else if (formData.telephone || formData.keyword) {
-    replyPage(200, "Files for " + formData.telephone + " are being retrieved", callback);
+  } else if (formData.mdn || formData.campaign || formData.message_type || formData.message_uid) {
+    replyPage(200, "Messages for " + formData.mdn + formData.campaign + formData.message_type + formData.message_uid + " are being retrieved", callback);
     
     pullRecords(formData);
   } else {
@@ -52,20 +51,18 @@ function pullFiles(formData) {
   getFilelist(function(fileList) {
     var listedFiles = getFilename(formData,fileList);
 
-    formData.bucket = "business.messagelogs";
+    formData.bucket = "archive";
 
     for (var i = 0; i < listedFiles.length; i++) {
 
       // Pull the contents file from the bucket and convert it to an array
       formData.key = listedFiles[i];
 
-      console.log(formData.key);
-
       // An object of options to indicate where to post to
       var post_options = {
-        hostname: 'serverlessendpoint.amazonaws.com',
+        hostname: 's3bucket.amazonaws.com',
         port: 443,
-        path: '/production/pull-file',
+        path: '/endpoint',
         method: 'POST'
       };
     
@@ -89,7 +86,7 @@ function pullRecords(formData) {
   console.log("Pulling records");
   // Run the query crafting function
   formData.query = craftQuery(formData);
-  formData.bucket = "business.messagelogs";
+  formData.bucket = "company.archive";
 
   // Run the function to pull the filelist
   getFilelist(function(fileList) {
@@ -105,9 +102,9 @@ function pullRecords(formData) {
       
       // An object of options to indicate where to post to
       var post_options = {
-        hostname: 'serverlessendpoint.amazonaws.com',
+        hostname: 's3bucket.amazonaws.com',
         port: 443,
-        path: '/production/pull-record',
+        path: '/endpoint',
         method: 'POST'
       };
 
@@ -126,37 +123,68 @@ function pullRecords(formData) {
   });
 };
 
-
 // Craft the query here using a function
 function craftQuery(formData) {
   var query;
 
   // Run a switch case statement here in the future per Sidra's advice
 
-	if (formData.telephone) {
-  	// Build the query based off of the phone number
-  	query = `SELECT * FROM s3Object s WHERE s._13 IN ('${formData.telephone}')`;
-  	
-    // Add the query based off of the keyword number
-    if (formData.keyword) {
-  		query = query + ` AND s._30 IN ('${formData.keyword}')`;
-  	}
+  if (formData.mdn) {
+    // Build the query based off of the phone number
+    query = `SELECT s._1, s._2, s._3, s._4, s._6, s._7, s._9, s._11, s._13, s._30, s._32 FROM s3Object s WHERE s._13 IN ('${formData.mdn}')`;
+    
+    // Add the query based off of the campaign number
+    if (formData.campaign) {
+      query = query + ` AND s._30 IN ('${formData.campaign}')`;
+    }
     // Check for results in the appropriate date range
     if (formData.start_date && formData.end_date) {
-      query = query + ` AND s._8 BETWEEN '${formData.start_date}' AND '${formData.end_date}'`;      
+      query = query + ` AND s._9 BETWEEN '${formData.start_date}' AND '${formData.end_date}'`;      
     }
-  } else if (formData.keyword) {
-  	// Build the query based off of the keyword number
-  	query = `SELECT * FROM s3Object s WHERE s._30 IN ('${formData.keyword}')`;
+    // Check for a message type other than all
+    if (formData.message_type) {
+      query = query + ` AND s._7 = '${formData.message_type}'`;
+    }
+    if (formData.message_uid) {
+      query = query + ` AND s_1 = '${formData.message_uid}'`;
+    }
+  } else if (formData.campaign) {
+    // Build the query based off of the campaign number
+    query = `SELECT s._1, s._2, s._3, s._4, s._6, s._7, s._9, s._11, s._13, s._30, s._32 FROM s3Object s WHERE s._30 IN ('${formData.campaign}')`;
+
+    // Check for a message type other than all
+    if (formData.message_type) {
+      query = query + ` AND s._7 = '${formData.message_type}'`;
+    }
+    if (formData.message_uid) {
+      query = query + ` AND s_1 = '${formData.message_uid}'`;
+    }
+    // Check for results in the appropriate date range
+    if (formData.start_date && formData.end_date) {
+      query = query + ` AND s._9 BETWEEN '${formData.start_date}' AND '${formData.end_date}'`;      
+    }
+  } else if (formData.message_type) {
+    // Check for a message type other than all
+    query = `SELECT s._1, s._2, s._3, s._4, s._6, s._7, s._9, s._11, s._13, s._30, s._32 FROM s3Object s WHERE s._7 = '${formData.message_type}'`;
 
     // Check for results in the appropriate date range
     if (formData.start_date && formData.end_date) {
-      query = query + ` AND s._8 BETWEEN '${formData.start_date}' AND '${formData.end_date}'`;      
+      query = query + ` AND s._9 BETWEEN '${formData.start_date}' AND '${formData.end_date}'`;      
+    }
+    if (formData.message_uid) {
+      query = query + ` AND s_1 = '${formData.message_uid}'`;
+    }
+  } else if (formData.message_uid) {
+    // Build the query based off of the message uid
+    query = `SELECT s._1, s._2, s._3, s._4, s._6, s._7, s._9, s._11, s._13, s._30, s._32 FROM s3Object s WHERE s._1 = '${formData.message_uid}'`;
+    // Check for results in the appropriate date range
+    if (formData.start_date && formData.end_date) {
+      query = query + ` AND s._9 BETWEEN '${formData.start_date}' AND '${formData.end_date}'`;      
     }
   } else {
     // Error with missing information error
     console.log("Missing information to craft query");
-  	return;
+    return;
   }
   console.log(query);
   return query;
@@ -167,7 +195,7 @@ function craftQuery(formData) {
 function getFilelist(callback) {
   // Pull the contents file from the bucket and convert it to an array
   const fn_params = {
-    Bucket: "business.messagelogs",
+    Bucket: "company.messagelogs",
     Key: "fileList.txt"
   };
 
@@ -210,8 +238,8 @@ function getFilename(formData, fileList) {
   var maxDate = new Date(formData.end_date);
 
   for (var i = 0; i < fileList.length; i++) {
-    if (formData.origincode) {    
-      if ( fileList[i].indexOf(formData.business) > -1 || fileList[i].indexOf(formData.origincode) > -1 ) {
+    if (formData.shortcode) {    
+      if ( fileList[i].indexOf(formData.company) > -1 || fileList[i].indexOf(formData.shortcode) > -1 ) {
         if (formData.start_date && formData.end_date) {
           // Pull the date from the file
           var fileDate = new Date(fileList[i].slice(13,20));
@@ -224,24 +252,23 @@ function getFilename(formData, fileList) {
         };
       };
     } else {
-      if (fileList[i].includes(formData.business)) {
+      if (fileList[i].includes(formData.company)) {
         if (formData.start_date && formData.end_date) {
           var fileDate = new Date(fileList[i].slice(13,20));
-
+        
           // Pull the date from the file
           if (fileDate >= minDate && fileDate <= maxDate) {
             console.log("Success");
             fileName.push(fileList[i]);
           };
         } else {
-          console.log(fileList[i]);
           fileName.push(fileList[i]);
         };
       };
     };
   };
 
-  sendFilelist(formData,fileName);
+  sendFilelist(fileName, formData);
   return fileName;
 };
 
@@ -251,20 +278,20 @@ function sendMail(formData, file, fileName) {
   var request;
 
   // Check the filled out fields and use that for the subject line
-  if (formData.telephone) {
-    request = formData.telephone;
-  } else if (formData.business) {
-    request = formData.business;
-  } else if (formData.origincode) {
-    request = formData.origincode;
-  } else if (formData.keyword) {
-    request = formData.keyword
+  if (formData.mdn) {
+    request = formData.mdn;
+  } else if (formData.company) {
+    request = formData.company;
+  } else if (formData.shortcode) {
+    request = formData.shortcode;
+  } else if (formData.campaign) {
+    request = formData.campaign
   }
 
   // send as email attachment
-  var ses_mail = "From: Data Handling <data.handling@business.com>\n";
-  ses_mail = ses_mail + "To: end.user@business.com\n";
-  ses_mail = ses_mail + "Subject: business Data Request for " + request + "\n";
+  var ses_mail = "From: DR <dr@company.com>\n";
+  ses_mail = ses_mail + "To: " + formData.email + "\n";
+  ses_mail = ses_mail + "Subject: company Data Request for " + request + "\n";
   ses_mail = ses_mail + "MIME-Version: 1.0\n";
   ses_mail = ses_mail + "Content-Type: multipart/mixed; boundary=\"NextPart\"\n\n";
   ses_mail = ses_mail + "--NextPart\n";
@@ -282,9 +309,9 @@ function sendMail(formData, file, fileName) {
       Data: new Buffer(ses_mail)
     },
     Destinations: [
-      `end.user@business.com`
+      formData.email
     ],
-    Source: `data.handling@business.com`
+    Source: `dr@company.com`
   };
   
   SES.sendRawEmail(params, function(err, data) {
@@ -293,25 +320,19 @@ function sendMail(formData, file, fileName) {
   });
 };
 
-function sendFilelist(formData,fileList) {
-
-  // For each item in fileList, prepend https://s3location.amazonaws.com/${formData.business}
-  var prepend = 'https://s3location.amazonaws.com/' + formData.business + '/';
+function sendFilelist(fileList, formData) {
 
   const emailParams = {
-    Source: 'data.handling@business.com', // SES SENDING EMAIL
-    ReplyToAddresses: ["data.handling@business.com"],
+    Source: 'dr@company.com', // SES SENDING EMAIL
+    ReplyToAddresses: ["dr@company.com"],
     Destination: {
-      ToAddresses: ["end.user@business.com"]
+      ToAddresses: [formData.email]
     },
     Message: {
       Body: {
         Text: {
           Charset: 'UTF-8',
-          // Take the fileList and prepend each entry with the correct S3
-          // Bucket information. 
-          Data: `Your files are being copied to the following bucket: 'https://s3location.amazonaws.com/${formData.business}'
-          \n\nPlease use the below links to download your files:\n\n${fileList.map(f => `${prepend}${f}`).join("\n")}`
+          Data: `The below files should be sent via individual emails shortly:\n${fileList.join('\n')}`
         },
       },
       Subject: {
@@ -320,8 +341,6 @@ function sendFilelist(formData,fileList) {
       },
     }
   };
-
-  
 
   SES.sendEmail(emailParams, function(err, data) {
     if (err) console.log(err, err.stack); // an error occurred
